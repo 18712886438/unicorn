@@ -1453,7 +1453,7 @@ static void tcg_out_addsubi(TCGContext *s, int ext, TCGReg rd,
     }
 }
 
-static inline void tcg_out_addsub2(TCGContext *s, TCGType ext, TCGReg rl,
+static void tcg_out_addsub2(TCGContext *s, TCGType ext, TCGReg rl,
                                    TCGReg rh, TCGReg al, TCGReg ah,
                                    tcg_target_long bl, tcg_target_long bh,
                                    bool const_bl, bool const_bh, bool sub)
@@ -1466,11 +1466,13 @@ static inline void tcg_out_addsub2(TCGContext *s, TCGType ext, TCGReg rl,
     }
 
     if (const_bl) {
-        insn = I3401_ADDSI;
-        if ((bl < 0) ^ sub) {
-            insn = I3401_SUBSI;
+        if (bl < 0) {
             bl = -bl;
+            insn = sub ? I3401_ADDSI : I3401_SUBSI;
+        } else {
+            insn = sub ? I3401_SUBSI : I3401_ADDSI;
         }
+
         if (unlikely(al == TCG_REG_XZR)) {
             /* ??? We want to allow al to be zero for the benefit of
                negation via subtraction.  However, that leaves open the
