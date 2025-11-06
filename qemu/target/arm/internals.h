@@ -57,6 +57,10 @@ static inline bool excp_is_internal(int excp)
  */
 #define GTIMER_SCALE 16
 
+#define GTIMER_DEFAULT_HZ 1000000000
+#define GTIMER_BACKCOMPAT_HZ 62500000
+#define GTIMER_QCOM_HZ 23000000
+
 /* Bit definitions for the v7M CONTROL register */
 FIELD(V7M_CONTROL, NPRIV, 0, 1)
 FIELD(V7M_CONTROL, SPSEL, 1, 1)

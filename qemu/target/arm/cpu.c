@@ -740,7 +740,7 @@ void arm_cpu_post_init(CPUState *obj)
     cpu->cfgend = false;
 
     if (arm_feature(&cpu->env, ARM_FEATURE_GENERIC_TIMER)) {
-        cpu->gt_cntfrq_hz = NANOSECONDS_PER_SECOND / GTIMER_SCALE;
+        cpu->gt_cntfrq_hz = GTIMER_QCOM_HZ;
     }
 }
 
