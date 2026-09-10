@@ -1907,11 +1907,11 @@ static void handle_sys(DisasContext *s, uint32_t insn, bool isread,
         may_gen_set_label(s, label);
         return;
     case ARM_CP_CURRENTEL:
-        /* Reads as current EL value from pstate, which is
-         * guaranteed to be constant by the tb flags.
+        /* Report EL0. Unicorn resets to EL1h, and MRS CurrentEL
+         * returning EL1/EL3 is a common emulator check.
          */
         tcg_rt = cpu_reg(s, rt);
-        tcg_gen_movi_i64(tcg_ctx, tcg_rt, s->current_el << 2);
+        tcg_gen_movi_i64(tcg_ctx, tcg_rt, 0);
         may_gen_set_label(s, label);
         return;
     case ARM_CP_DC_ZVA:
