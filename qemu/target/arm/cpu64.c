@@ -52,7 +52,7 @@ static void aarch64_hide_unicorn_ids(ARMCPU *cpu)
     cpu->ccsidr[2] = 0x70ffe07a;
 
     cpu->reset_sctlr |= SCTLR_EnIA | SCTLR_EnIB | SCTLR_EnDA | SCTLR_EnDB |
-                        SCTLR_UCI;
+                        SCTLR_UCI | SCTLR_UCT | SCTLR_DZE;
 
     t = cpu->isar.id_aa64isar0;
     FIELD_DP64(t, ID_AA64ISAR0, AES, 2, t);
@@ -427,14 +427,20 @@ ARMCPU *cpu_aarch64_init(struct uc_struct *uc)
         }
     }
 
-    // Backward compatability to enable FULL 64bits address space.
-    env->pstate = PSTATE_MODE_EL1h;
+    /*
+     * Android apps run at EL0. Keep Unicorn in that regime so sysreg
+     * access matches Linux userspace (CurrentEL UNDEF, CNTPCT trapped,
+     * CNTVCT/CNTFRQ allowed, ID registers emulated).
+     */
+    env->pstate = PSTATE_MODE_EL0t;
 
-    /* Linux userspace: EL0 may read CNTPCT/CNTVCT/CNTFRQ. */
-    env->cp15.c14_cntkctl = 0x3;
+    /* Linux arch_timer: EL0VCTEN only; physical counter is not for EL0. */
+    env->cp15.c14_cntkctl = 0x2;
+    /* CPACR.FPEN=0b11: EL0/EL1 may use FP/AdvSIMD. */
+    env->cp15.cpacr_el1 = 3U << 20;
     /*
      * PAC helpers trap to EL2 when HCR_EL2 is suppressed (secure EL1).
-     * Drop EL2 so PACIA/RETAB run at EL1; still don't trap to EL3.
+     * Drop EL2 so PACIA/RETAB run; still don't trap to EL3.
      */
     env->features &= ~(1ULL << ARM_FEATURE_EL2);
     env->cp15.scr_el3 |= SCR_API | SCR_APK;

@@ -456,6 +456,11 @@ static void test_arm64_mmu(void)
     TEST_CHECK(data != NULL);
 
     OK(uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc));
+    {
+        /* Guest code MSRs EL1 sysregs; default CPU is EL0 like Android. */
+        uint32_t pstate = 5; /* EL1h */
+        OK(uc_reg_write(uc, UC_ARM64_REG_PSTATE, &pstate));
+    }
     OK(uc_ctl_tlb_mode(uc, UC_TLB_CPU));
     OK(uc_mem_map(uc, 0, 0x2000, UC_PROT_ALL));
     OK(uc_mem_write(uc, 0, code, sizeof(code) - 1));
@@ -705,9 +710,10 @@ static void test_arm64_currentel_el0(void)
     uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, code, sizeof(code) - 1,
                     UC_CPU_ARM64_A72);
     OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0));
-    OK(uc_emu_start(uc, code_start, code_start + sizeof(code) - 1, 0, 0));
-    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
-    TEST_CHECK(x0 == 0);
+    /* EL0: MRS CurrentEL is UNDEFINED, same as an Android app. */
+    uc_assert_err(UC_ERR_EXCEPTION,
+                  uc_emu_start(uc, code_start, code_start + sizeof(code) - 1,
+                               0, 0));
     OK(uc_close(uc));
 }
 
@@ -727,12 +733,12 @@ static void test_arm64_cntfrq_qcom(void)
     OK(uc_close(uc));
 }
 
-static void test_arm64_cntpct_advances(void)
+static void test_arm64_cntvct_advances(void)
 {
     uc_engine *uc;
     uint64_t x0 = 0, x1 = 0;
-    /* mrs x0, CNTPCT_EL0; mrs x1, CNTPCT_EL0 */
-    char code[] = "\x20\xe0\x3b\xd5\x21\xe0\x3b\xd5";
+    /* mrs x0, CNTVCT_EL0; mrs x1, CNTVCT_EL0 */
+    char code[] = "\x40\xe0\x3b\xd5\x41\xe0\x3b\xd5";
 
     uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, code, sizeof(code) - 1,
                     UC_CPU_ARM64_A72);
@@ -741,6 +747,20 @@ static void test_arm64_cntpct_advances(void)
     OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
     TEST_CHECK(x0 != 0);
     TEST_CHECK(x1 > x0);
+    OK(uc_close(uc));
+}
+
+static void test_arm64_cntpct_el0_traps(void)
+{
+    uc_engine *uc;
+    /* mrs x0, CNTPCT_EL0 — Linux disables EL0PCTEN */
+    char code[] = "\x20\xe0\x3b\xd5";
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, code, sizeof(code) - 1,
+                    UC_CPU_ARM64_A72);
+    uc_assert_err(UC_ERR_EXCEPTION,
+                  uc_emu_start(uc, code_start, code_start + sizeof(code) - 1,
+                               0, 0));
     OK(uc_close(uc));
 }
 
@@ -864,7 +884,8 @@ TEST_LIST = {{"test_arm64_until", test_arm64_until},
              {"test_arm64_pc_guarantee", test_arm64_pc_guarantee},
              {"test_arm64_currentel_el0", test_arm64_currentel_el0},
              {"test_arm64_cntfrq_qcom", test_arm64_cntfrq_qcom},
-             {"test_arm64_cntpct_advances", test_arm64_cntpct_advances},
+             {"test_arm64_cntvct_advances", test_arm64_cntvct_advances},
+             {"test_arm64_cntpct_el0_traps", test_arm64_cntpct_el0_traps},
              {"test_arm64_midr_kryo", test_arm64_midr_kryo},
              {"test_arm64_pacia_retab", test_arm64_pacia_retab},
              {"test_arm64_smc_icache", test_arm64_smc_icache},

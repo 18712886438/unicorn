@@ -1862,9 +1862,16 @@ static void handle_sys(DisasContext *s, uint32_t insn, bool isread,
 
     /* Check access permissions */
     if (!cp_access_ok(s->current_el, ri, isread)) {
-        unallocated_encoding(s);
-        may_gen_set_label(s, label);
-        return;
+        /*
+         * Linux trap-and-emulates userspace MRS of ID registers
+         * (Op0=3, Op1=0, CRn=0, CRm=0..7): MIDR, REVIDR, ID_AA64*.
+         */
+        if (!(s->current_el == 0 && isread && op0 == 3 && op1 == 0 &&
+              crn == 0 && crm <= 7)) {
+            unallocated_encoding(s);
+            may_gen_set_label(s, label);
+            return;
+        }
     }
 
     if (ri->accessfn) {
@@ -1907,11 +1914,11 @@ static void handle_sys(DisasContext *s, uint32_t insn, bool isread,
         may_gen_set_label(s, label);
         return;
     case ARM_CP_CURRENTEL:
-        /* Report EL0. Unicorn resets to EL1h, and MRS CurrentEL
-         * returning EL1/EL3 is a common emulator check.
+        /* Architecturally UNDEF at EL0 (cp_access_ok). At EL1+ this
+         * reads PSTATE.EL, which is constant for the TB.
          */
         tcg_rt = cpu_reg(s, rt);
-        tcg_gen_movi_i64(tcg_ctx, tcg_rt, 0);
+        tcg_gen_movi_i64(tcg_ctx, tcg_rt, s->current_el << 2);
         may_gen_set_label(s, label);
         return;
     case ARM_CP_DC_ZVA:

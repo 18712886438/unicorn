@@ -57,19 +57,11 @@ static void test_currentel(void)
         return;
     }
     uc_reg_write(uc, UC_ARM64_REG_X0, &x0);
-    if (run_insns(uc, code, sizeof(code) - 1) != UC_ERR_OK) {
-        fail("CurrentEL", uc_strerror(uc_errno(uc)));
-        uc_close(uc);
-        return;
-    }
-    uc_reg_read(uc, UC_ARM64_REG_X0, &x0);
-    if (x0 == 0) {
-        pass("CurrentEL", "MRS returns EL0");
+    /* Android apps are EL0; MRS CurrentEL is UNDEFINED (not a successful 0). */
+    if (run_insns(uc, code, sizeof(code) - 1) == UC_ERR_EXCEPTION) {
+        pass("CurrentEL", "UNDEF at EL0 (not readable like EL1)");
     } else {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "got EL=%" PRIu64 " (raw 0x%" PRIx64 ")",
-                 x0 >> 2, x0);
-        fail("CurrentEL", buf);
+        fail("CurrentEL", "MRS succeeded; userspace should UNDEF");
     }
     uc_close(uc);
 }
@@ -102,19 +94,19 @@ static void test_cntfrq(void)
     uc_close(uc);
 }
 
-static void test_cntpct(void)
+static void test_cntvct(void)
 {
     uc_engine *uc = open_uc();
     uint64_t x0 = 0, x1 = 0;
-    /* mrs x0, CNTPCT_EL0; mrs x1, CNTPCT_EL0 */
-    const char code[] = "\x20\xe0\x3b\xd5\x21\xe0\x3b\xd5";
+    /* mrs x0, CNTVCT_EL0; mrs x1, CNTVCT_EL0 */
+    const char code[] = "\x40\xe0\x3b\xd5\x41\xe0\x3b\xd5";
 
     if (!uc) {
-        fail("CNTPCT_EL0", "uc_open");
+        fail("CNTVCT_EL0", "uc_open");
         return;
     }
     if (run_insns(uc, code, sizeof(code) - 1) != UC_ERR_OK) {
-        fail("CNTPCT_EL0", "MRS trapped");
+        fail("CNTVCT_EL0", "MRS trapped");
         uc_close(uc);
         return;
     }
@@ -123,11 +115,30 @@ static void test_cntpct(void)
     if (x0 != 0 && x1 > x0) {
         char buf[80];
         snprintf(buf, sizeof(buf), "0x%" PRIx64 " -> 0x%" PRIx64, x0, x1);
-        pass("CNTPCT_EL0", buf);
+        pass("CNTVCT_EL0", buf);
     } else {
         char buf[80];
         snprintf(buf, sizeof(buf), "x0=0x%" PRIx64 " x1=0x%" PRIx64, x0, x1);
-        fail("CNTPCT_EL0", buf);
+        fail("CNTVCT_EL0", buf);
+    }
+    uc_close(uc);
+}
+
+static void test_cntpct_traps(void)
+{
+    uc_engine *uc = open_uc();
+    /* mrs x0, CNTPCT_EL0 */
+    const char code[] = "\x20\xe0\x3b\xd5";
+
+    if (!uc) {
+        fail("CNTPCT_EL0", "uc_open");
+        return;
+    }
+    /* Linux leaves EL0PCTEN clear; a successful read is an emulator tell. */
+    if (run_insns(uc, code, sizeof(code) - 1) == UC_ERR_EXCEPTION) {
+        pass("CNTPCT_EL0", "trapped at EL0 (Linux EL0PCTEN=0)");
+    } else {
+        fail("CNTPCT_EL0", "userspace should not read the physical counter");
     }
     uc_close(uc);
 }
@@ -306,7 +317,8 @@ int main(void)
     printf("ARM64 Unicorn anti-detect checks\n");
     test_currentel();
     test_cntfrq();
-    test_cntpct();
+    test_cntvct();
+    test_cntpct_traps();
     test_midr();
     test_pacia_retab();
     test_smc_icache();

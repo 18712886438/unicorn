@@ -2768,7 +2768,7 @@ static const ARMCPRegInfo generic_timer_cp_reginfo[] = {
       .opc0 = 3, .opc1 = 0, .crn = 14, .crm = 1, .opc2 = 0,
       .access = PL1_RW,
       .fieldoffset = offsetof(CPUARMState, cp15.c14_cntkctl),
-      .resetvalue = 0x3, /* EL0PCTEN | EL0VCTEN */
+      .resetvalue = 0x2, /* EL0VCTEN; Linux does not give EL0 CNTPCT */
     },
     /* per-timer control */
     { .name = "CNTP_CTL", .cp = 15, .crn = 14, .crm = 2, .opc1 = 0, .opc2 = 1,
