@@ -22,6 +22,7 @@
 #include "arm_ldst.h"
 #include "exec/cpu_ldst.h"
 #include "kvm-consts.h"
+#include "exec/memattrs.h"
 
 #ifdef TARGET_AARCH64
 #include <qemu/guest-random.h>
@@ -2336,9 +2337,20 @@ static void gt_timer_reset(CPUARMState *env, const ARMCPRegInfo *ri,
 #endif
 }
 
+static uint64_t gt_read_counter_monotonic(CPUARMState *env)
+{
+    uint64_t now = gt_get_countervalue(env);
+
+    if (now <= env->cp15.last_cntpct) {
+        now = env->cp15.last_cntpct + 1;
+    }
+    env->cp15.last_cntpct = now;
+    return now;
+}
+
 static uint64_t gt_cnt_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    return gt_get_countervalue(env);
+    return gt_read_counter_monotonic(env);
 }
 
 static uint64_t gt_virt_cnt_offset(CPUARMState *env)
@@ -2365,7 +2377,7 @@ static uint64_t gt_virt_cnt_offset(CPUARMState *env)
 
 static uint64_t gt_virt_cnt_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    return gt_get_countervalue(env) - gt_virt_cnt_offset(env);
+    return gt_read_counter_monotonic(env) - gt_virt_cnt_offset(env);
 }
 
 static void gt_cval_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -2756,7 +2768,7 @@ static const ARMCPRegInfo generic_timer_cp_reginfo[] = {
       .opc0 = 3, .opc1 = 0, .crn = 14, .crm = 1, .opc2 = 0,
       .access = PL1_RW,
       .fieldoffset = offsetof(CPUARMState, cp15.c14_cntkctl),
-      .resetvalue = 0,
+      .resetvalue = 0x3, /* EL0PCTEN | EL0VCTEN */
     },
     /* per-timer control */
     { .name = "CNTP_CTL", .cp = 15, .crn = 14, .crm = 2, .opc1 = 0, .opc2 = 1,
@@ -3997,6 +4009,20 @@ static CPAccessResult aa64_cacheop_pou_access(CPUARMState *env,
     return CP_ACCESS_OK;
 }
 
+static void ic_ivau_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                          uint64_t value)
+{
+    CPUState *cs = env_cpu(env);
+
+    tb_invalidate_phys_addr(cs->as, value, MEMTXATTRS_UNSPECIFIED);
+}
+
+static void ic_iallu_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                           uint64_t value)
+{
+    tb_flush(env_cpu(env));
+}
+
 /* See: D4.7.2 TLB maintenance requirements and the TLB maintenance instructions
  * Page D4-1736 (DDI0487A.b)
  */
@@ -4389,19 +4415,21 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
     { .name = "CURRENTEL", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .opc2 = 2, .crn = 4, .crm = 2,
       .access = PL1_R, .type = ARM_CP_CURRENTEL },
-    /* Cache ops: all NOPs since we don't emulate caches */
+    /* I-cache maintenance: drop translated code so self-modifying
+     * sequences that flush I-cache see the new instructions.
+     */
     { .name = "IC_IALLUIS", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 7, .crm = 1, .opc2 = 0,
-      .access = PL1_W, .type = ARM_CP_NOP,
-      .accessfn = aa64_cacheop_pou_access },
+      .access = PL1_W, .type = ARM_CP_NO_RAW,
+      .accessfn = aa64_cacheop_pou_access, .writefn = ic_iallu_write },
     { .name = "IC_IALLU", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 7, .crm = 5, .opc2 = 0,
-      .access = PL1_W, .type = ARM_CP_NOP,
-      .accessfn = aa64_cacheop_pou_access },
+      .access = PL1_W, .type = ARM_CP_NO_RAW,
+      .accessfn = aa64_cacheop_pou_access, .writefn = ic_iallu_write },
     { .name = "IC_IVAU", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 3, .crn = 7, .crm = 5, .opc2 = 1,
-      .access = PL0_W, .type = ARM_CP_NOP,
-      .accessfn = aa64_cacheop_pou_access },
+      .access = PL0_W, .type = ARM_CP_NO_RAW,
+      .accessfn = aa64_cacheop_pou_access, .writefn = ic_ivau_write },
     { .name = "DC_IVAC", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 7, .crm = 6, .opc2 = 1,
       .access = PL1_W, .accessfn = aa64_cacheop_poc_access,

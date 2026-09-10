@@ -1193,15 +1193,17 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
 #ifdef TARGET_ARM
     struct uc_struct *uc = cpu->uc;
 #endif
-    ram_addr_t ram_addr = mem_vaddr + iotlbentry->addr;
     MemoryRegion *mr = cpu->uc->memory_mapping(cpu->uc, tlbe->paddr | (mem_vaddr & ~TARGET_PAGE_MASK));
 
+#ifndef TARGET_AARCH64
     if (mr && (mr->perms & UC_PROT_EXEC) != 0) {
+        ram_addr_t ram_addr = mem_vaddr + iotlbentry->addr;
         struct page_collection *pages
             = page_collection_lock(cpu->uc, ram_addr, ram_addr + size);
         tb_invalidate_phys_page_fast(cpu->uc, pages, ram_addr, size, retaddr);
         page_collection_unlock(pages);
     }
+#endif
 
     /* For exec pages, this is cleared in tb_gen_code. */
     // If we:
