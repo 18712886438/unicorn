@@ -695,6 +695,154 @@ static void test_arm64_pc_guarantee(void)
     OK(uc_close(uc));
 }
 
+static void test_arm64_currentel_el0(void)
+{
+    uc_engine *uc;
+    uint64_t x0 = 0xdead;
+    /* mrs x0, CurrentEL */
+    char code[] = "\x40\x42\x38\xd5";
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, code, sizeof(code) - 1,
+                    UC_CPU_ARM64_A72);
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    TEST_CHECK(x0 == 0);
+    OK(uc_close(uc));
+}
+
+static void test_arm64_cntfrq_qcom(void)
+{
+    uc_engine *uc;
+    uint64_t x0 = 0;
+    /* mrs x0, CNTFRQ_EL0 */
+    char code[] = "\x00\xe0\x3b\xd5";
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, code, sizeof(code) - 1,
+                    UC_CPU_ARM64_A72);
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    TEST_CHECK(x0 == 23000000);
+    TEST_CHECK(x0 != 62500000);
+    OK(uc_close(uc));
+}
+
+static void test_arm64_cntpct_advances(void)
+{
+    uc_engine *uc;
+    uint64_t x0 = 0, x1 = 0;
+    /* mrs x0, CNTPCT_EL0; mrs x1, CNTPCT_EL0 */
+    char code[] = "\x20\xe0\x3b\xd5\x21\xe0\x3b\xd5";
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, code, sizeof(code) - 1,
+                    UC_CPU_ARM64_A72);
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
+    TEST_CHECK(x0 != 0);
+    TEST_CHECK(x1 > x0);
+    OK(uc_close(uc));
+}
+
+static void test_arm64_midr_kryo(void)
+{
+    uc_engine *uc;
+    uint64_t x0 = 0;
+    /* mrs x0, MIDR_EL1 */
+    char code[] = "\x00\x00\x38\xd5";
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, code, sizeof(code) - 1,
+                    UC_CPU_ARM64_A72);
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    TEST_CHECK(x0 == 0x511f8041);
+    TEST_CHECK((x0 >> 24) == 0x51);
+    OK(uc_close(uc));
+}
+
+static void test_arm64_pacia_retab(void)
+{
+    uc_engine *uc;
+    uint64_t x0, x0_orig, x30, sp, pc;
+    /* pacia x0, sp */
+    char pacia[] = "\xe0\x03\xc1\xda";
+    /* pacib x30, sp; retab; nop */
+    char retab[] = "\xfe\x07\xc1\xda\xff\x0b\x5f\xd6\x1f\x20\x03\xd5";
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, pacia, sizeof(pacia) - 1,
+                    UC_CPU_ARM64_A72);
+
+    x0_orig = 0x1000;
+    sp = 0x3000;
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0_orig));
+    OK(uc_reg_write(uc, UC_ARM64_REG_SP, &sp));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(pacia) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    TEST_CHECK(x0 != x0_orig);
+    TEST_CHECK((x0 & 0xfff) == 0);
+
+    OK(uc_close(uc));
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, retab, sizeof(retab) - 1,
+                    UC_CPU_ARM64_A72);
+    sp = 0x3000;
+    x30 = code_start + 8;
+    OK(uc_reg_write(uc, UC_ARM64_REG_SP, &sp));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X30, &x30));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(retab) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_PC, &pc));
+    TEST_CHECK(pc == code_start + sizeof(retab) - 1);
+    OK(uc_close(uc));
+}
+
+static void test_arm64_smc_icache(void)
+{
+    uc_engine *uc;
+    uint64_t x0, x1, x2;
+    /* add w0, w0, #1 */
+    char orig[] = "\x00\x04\x00\x11";
+    /* str w1, [x2] */
+    char store[] = "\x41\x00\x00\xb9";
+    /* ic ivau, x0; isb */
+    char flush[] = "\x20\x75\x0b\xd5\xdf\x3f\x03\xd5";
+    uint32_t patched = 0x11000800; /* add w0, w0, #2 */
+
+    uc_common_setup(&uc, UC_ARCH_ARM64, UC_MODE_ARM, orig, sizeof(orig) - 1,
+                    UC_CPU_ARM64_A72);
+    OK(uc_mem_write(uc, code_start + 0x100, store, sizeof(store) - 1));
+    OK(uc_mem_write(uc, code_start + 0x200, flush, sizeof(flush) - 1));
+
+    x0 = 0;
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0));
+    OK(uc_emu_start(uc, code_start, (uint64_t)-1, 0, 1));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    TEST_CHECK(x0 == 1);
+
+    x1 = patched;
+    x2 = code_start;
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &x1));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X2, &x2));
+    OK(uc_emu_start(uc, code_start + 0x100, (uint64_t)-1, 0, 1));
+
+    x0 = 0;
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0));
+    OK(uc_emu_start(uc, code_start, (uint64_t)-1, 0, 1));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    TEST_CHECK(x0 == 1);
+
+    x0 = code_start;
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0));
+    OK(uc_emu_start(uc, code_start + 0x200, (uint64_t)-1, 0, 2));
+
+    x0 = 0;
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0));
+    OK(uc_emu_start(uc, code_start, (uint64_t)-1, 0, 1));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &x0));
+    TEST_CHECK(x0 == 2);
+
+    OK(uc_close(uc));
+}
+
 TEST_LIST = {{"test_arm64_until", test_arm64_until},
              {"test_arm64_code_patching", test_arm64_code_patching},
              {"test_arm64_code_patching_count", test_arm64_code_patching_count},
@@ -714,4 +862,10 @@ TEST_LIST = {{"test_arm64_until", test_arm64_until},
              {"test_arm64_mem_prot_regress", test_arm64_mem_prot_regress},
              {"test_arm64_mem_hook_read_write", test_arm64_mem_hook_read_write},
              {"test_arm64_pc_guarantee", test_arm64_pc_guarantee},
+             {"test_arm64_currentel_el0", test_arm64_currentel_el0},
+             {"test_arm64_cntfrq_qcom", test_arm64_cntfrq_qcom},
+             {"test_arm64_cntpct_advances", test_arm64_cntpct_advances},
+             {"test_arm64_midr_kryo", test_arm64_midr_kryo},
+             {"test_arm64_pacia_retab", test_arm64_pacia_retab},
+             {"test_arm64_smc_icache", test_arm64_smc_icache},
              {NULL, NULL}};
