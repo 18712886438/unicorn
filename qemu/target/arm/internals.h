@@ -53,7 +53,7 @@ static inline bool excp_is_internal(int excp)
 }
 
 /* Scale factor for generic timers, ie number of ns per tick.
- * This gives a 62.5MHz timer.
+ * This gives a 62.5MHz timer (the QEMU/Unicorn default).
  */
 #define GTIMER_SCALE 16
 

@@ -439,6 +439,7 @@ typedef struct CPUARMState {
             uint64_t tpidrro_el[1];
         };
         uint64_t c14_cntfrq; /* Counter Frequency register */
+        uint64_t last_cntpct; /* last CNTPCT/CNTVCT value returned */
         uint64_t c14_cntkctl; /* Timer Control register */
         uint32_t cnthctl_el2; /* Counter/Timer Hyp Control register */
         uint64_t cntvoff_el2; /* Counter Virtual Offset register */

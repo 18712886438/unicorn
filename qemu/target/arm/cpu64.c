@@ -34,6 +34,51 @@ static inline void set_feature(CPUARMState *env, int feature)
     env->features |= 1ULL << feature;
 }
 
+/* Overlay a Qualcomm Kryo-class identity on top of the QEMU A5x models.
+ * Default Unicorn A53/A57/A72 IDs (MIDR 0x41xxxx, CNTFRQ 62.5MHz, no PAC)
+ * are a common guest-side emulator check.
+ */
+static void aarch64_hide_unicorn_ids(ARMCPU *cpu)
+{
+    uint64_t t;
+
+    /* Kryo 4xx Gold: implementer 0x51, part 0x804 */
+    cpu->midr = 0x511f8041;
+    cpu->revidr = 0;
+    cpu->ctr = 0x9444c004;
+    cpu->clidr = 0x82009203;
+    cpu->ccsidr[0] = 0x701fe014;
+    cpu->ccsidr[1] = 0x201fe014;
+    cpu->ccsidr[2] = 0x70ffe07a;
+
+    cpu->reset_sctlr |= SCTLR_EnIA | SCTLR_EnIB | SCTLR_EnDA | SCTLR_EnDB |
+                        SCTLR_UCI;
+
+    t = cpu->isar.id_aa64isar0;
+    FIELD_DP64(t, ID_AA64ISAR0, AES, 2, t);
+    FIELD_DP64(t, ID_AA64ISAR0, SHA1, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR0, SHA2, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR0, CRC32, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR0, ATOMIC, 2, t);
+    FIELD_DP64(t, ID_AA64ISAR0, RDM, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR0, DP, 1, t);
+    cpu->isar.id_aa64isar0 = t;
+
+    t = cpu->isar.id_aa64isar1;
+    FIELD_DP64(t, ID_AA64ISAR1, DPB, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR1, APA, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR1, GPA, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR1, JSCVT, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR1, FCMA, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR1, LRCPC, 1, t);
+    FIELD_DP64(t, ID_AA64ISAR1, SB, 1, t);
+    cpu->isar.id_aa64isar1 = t;
+
+    t = cpu->isar.id_aa64pfr1;
+    FIELD_DP64(t, ID_AA64PFR1, SSBS, 1, t);
+    cpu->isar.id_aa64pfr1 = t;
+}
+
 static void aarch64_a57_initfn(struct uc_struct *uc, CPUState *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
@@ -361,6 +406,8 @@ ARMCPU *cpu_aarch64_init(struct uc_struct *uc)
         aarch64_cpus[uc->cpu_model].initfn(uc, cs);
     }
 
+    aarch64_hide_unicorn_ids(cpu);
+
     /* postinit ARMCPU */
     arm_cpu_post_init(cs);
 
@@ -382,6 +429,15 @@ ARMCPU *cpu_aarch64_init(struct uc_struct *uc)
 
     // Backward compatability to enable FULL 64bits address space.
     env->pstate = PSTATE_MODE_EL1h;
+
+    /* Linux userspace: EL0 may read CNTPCT/CNTVCT/CNTFRQ. */
+    env->cp15.c14_cntkctl = 0x3;
+    /*
+     * PAC helpers trap to EL2 when HCR_EL2 is suppressed (secure EL1).
+     * Drop EL2 so PACIA/RETAB run at EL1; still don't trap to EL3.
+     */
+    env->features &= ~(1ULL << ARM_FEATURE_EL2);
+    env->cp15.scr_el3 |= SCR_API | SCR_APK;
 
     arm_rebuild_hflags(env);
 
